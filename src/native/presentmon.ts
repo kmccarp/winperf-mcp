@@ -17,6 +17,7 @@ export interface FrameEvent {
   msGpuBusy: number;
   msGpuLatency: number;
   presentMode: string;
+  /** Instantaneous rate for this one frame. Never average these — see computeSummary. */
   fps: number;
 }
 
@@ -79,8 +80,12 @@ function computeSummary(frames: FrameEvent[]): AppFpsSummary[] {
   for (const [, appFrames] of groups) {
     if (appFrames.length < 2) continue;
 
-    const fpsValues = appFrames.map(f => f.fps).sort((a, b) => a - b);
-    const frameTimeValues = appFrames.map(f => f.msBetweenPresents);
+    // Every FPS figure is derived from frame times rather than from the per-frame
+    // fps values. Averaging 1000/msBetweenPresents is not the same as
+    // 1000/avg(msBetweenPresents), and the sub-millisecond intervals that show up
+    // in duplicate/discarded presents push that average arbitrarily high — a 92 FPS
+    // capture reported 1549.5.
+    const frameTimes = appFrames.map(f => f.msBetweenPresents).sort((a, b) => a - b);
     const cpuBusyValues = appFrames.map(f => f.msCpuBusy);
     const gpuBusyValues = appFrames.map(f => f.msGpuBusy);
 
@@ -89,17 +94,21 @@ function computeSummary(frames: FrameEvent[]): AppFpsSummary[] {
       const idx = Math.max(0, Math.ceil((p / 100) * sorted.length) - 1);
       return sorted[idx];
     };
+    const fpsFrom = (ms: number) => (ms > 0 ? Math.round((1000 / ms) * 10) / 10 : 0);
+
+    const avgFrameTimeMs = avg(frameTimes);
 
     summaries.push({
       application: appFrames[0].application,
       processId: appFrames[0].processId,
       frameCount: appFrames.length,
-      avgFps: Math.round(avg(fpsValues) * 10) / 10,
-      minFps: Math.round(fpsValues[0] * 10) / 10,
-      maxFps: Math.round(fpsValues[fpsValues.length - 1] * 10) / 10,
-      p1Fps: Math.round(percentile(fpsValues, 1) * 10) / 10,
-      p5Fps: Math.round(percentile(fpsValues, 5) * 10) / 10,
-      avgFrameTimeMs: Math.round(avg(frameTimeValues) * 100) / 100,
+      avgFps: fpsFrom(avgFrameTimeMs),
+      // Slow frames are the low-FPS ones, so the FPS lows come from the frame-time highs.
+      minFps: fpsFrom(frameTimes[frameTimes.length - 1]),
+      maxFps: fpsFrom(frameTimes[0]),
+      p1Fps: fpsFrom(percentile(frameTimes, 99)),
+      p5Fps: fpsFrom(percentile(frameTimes, 95)),
+      avgFrameTimeMs: Math.round(avgFrameTimeMs * 100) / 100,
       avgCpuBusyMs: Math.round(avg(cpuBusyValues) * 100) / 100,
       avgGpuBusyMs: Math.round(avg(gpuBusyValues) * 100) / 100,
       presentMode: appFrames[0].presentMode,
