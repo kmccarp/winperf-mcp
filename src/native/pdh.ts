@@ -4,6 +4,11 @@ const pdh = koffi.load('pdh.dll');
 
 // Constants
 const PDH_FMT_DOUBLE = 0x00000200;
+// Without this, PDH clamps percentage counters to 100. `\Process(*)\% Processor Time`
+// is per-machine, not per-core, so on an N-logical-core box it legitimately ranges to
+// N*100 — and a busy process otherwise reads a flat 100.0 forever.
+const PDH_FMT_NOCAP100 = 0x00008000;
+const PDH_FMT = PDH_FMT_DOUBLE | PDH_FMT_NOCAP100;
 const PDH_MORE_DATA = 0x800007D2 | 0; // Ensure signed int32 representation
 const ERROR_SUCCESS = 0;
 
@@ -118,7 +123,7 @@ export class PdhQuery {
 
     for (const counter of this.counters) {
       const status = PdhGetFormattedCounterValue(
-        counter.handle, PDH_FMT_DOUBLE, typeOut, valueOut
+        counter.handle, PDH_FMT, typeOut, valueOut
       );
       if (status === ERROR_SUCCESS && valueOut.CStatus === 0) {
         result[counter.name] = valueOut.doubleValue;
